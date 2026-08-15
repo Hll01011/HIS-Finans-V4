@@ -1,54 +1,59 @@
 (() => {
-  'use strict';
-
-  const statusEl = document.getElementById('status');
-  const detailEl = document.getElementById('detail');
-  const timeEl = document.getElementById('time');
-
-  function setStatus(type, title, detail) {
-    statusEl.className = `status ${type}`;
-    statusEl.textContent = title;
-    detailEl.textContent = detail;
-  }
-
-  async function testSupabase() {
-    const started = performance.now();
-
-    try {
-      if (!window.HIS_CONFIG?.supabaseUrl || !window.HIS_CONFIG?.supabasePublishableKey) {
-        throw new Error('Supabase yapılandırması eksik.');
-      }
-
-      const { createClient } = window.supabase;
-      const client = createClient(
-        window.HIS_CONFIG.supabaseUrl,
-        window.HIS_CONFIG.supabasePublishableKey,
-        {
-          auth: {
-            persistSession: false,
-            autoRefreshToken: false,
-            detectSessionInUrl: false
-          }
-        }
-      );
-
-      const { error } = await client.auth.getSession();
-      const elapsed = Math.round(performance.now() - started);
-      timeEl.textContent = `${elapsed} ms`;
-
-      if (error) {
-        throw error;
-      }
-
-      setStatus('ok', 'BAĞLANTI AKTİF', 'HIS-Finans-V4 Supabase projesine erişim doğrulandı. Henüz hiçbir finans tablosuna dokunulmadı.');
-    } catch (error) {
-      const elapsed = Math.round(performance.now() - started);
-      timeEl.textContent = `${elapsed} ms`;
-      console.error('HIS Finans bağlantı testi:', error);
-      setStatus('error', 'BAĞLANTI HATASI', error?.message || String(error));
-    }
-  }
-
-  document.getElementById('retry').addEventListener('click', testSupabase);
-  testSupabase();
+'use strict';
+const { createClient } = window.supabase;
+const cfg = window.HIS_CONFIG;
+const db = createClient(cfg.supabaseUrl, cfg.supabasePublishableKey, { auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false} });
+const $ = s => document.querySelector(s);
+const content = $('#content');
+const titles = {dashboard:'Genel Bakış',cariler:'Cari Hesaplar',bankalar:'Bankalar',kasalar:'Kasa',transferler:'Para Transferleri',cekler:'Çek / Senet',faturalar:'Faturalar',tahsilatlar:'Tahsilatlar'};
+const state = { page:'dashboard', cariler:[], bankalar:[], kasalar:[], transfers:[], cekler:[], faturalar:[], tahsilatlar:[] };
+const money = n => new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY'}).format(Number(n||0));
+const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+function toast(msg, ok=true){const t=$('#toast');t.textContent=msg;t.className=ok?'show ok':'show err';setTimeout(()=>t.className='',3500)}
+function setDb(ok,text){$('#dbDot').className=ok?'ok':'err';$('#dbText').textContent=text;$('#live').textContent=ok?'● CANLI':'● HATA';$('#live').className=ok?'pill ok':'pill err'}
+async function q(table, columns='*', order='created_at.desc'){let x=await db.from(table).select(columns).order(order.split('.')[0],{ascending:order.endsWith('.asc')});if(x.error)throw x.error;return x.data||[]}
+async function rpc(name,args){const x=await db.rpc(name,args);if(x.error)throw x.error;return x.data}
+async function loadAll(){
+  [state.cariler,state.bankalar,state.kasalar,state.transfers,state.cekler,state.faturalar,state.tahsilatlar]=await Promise.all([
+    q('cari_bakiyeleri','*','created_at.desc'),q('banka_bakiyeleri','*','created_at.desc'),q('kasa_bakiyeleri','*','created_at.desc'),q('transferler','*','created_at.desc'),q('cek_senetler','*','created_at.desc'),q('faturalar','*','created_at.desc'),q('tahsilatlar','*','created_at.desc')
+  ]);
+}
+async function test(){try{const x=await db.from('finans_islemleri').select('id').limit(1);if(x.error)throw x.error;setDb(true,'Veritabanı canlı');return true}catch(e){console.error(e);setDb(false,e.message);toast('Veritabanı bağlantı hatası: '+e.message,false);return false}}
+function shell(title,desc,body){return `<div class="section-head"><div><h2>${title}</h2><p>${desc}</p></div></div>${body}`}
+function cards(){const bank=state.bankalar.reduce((a,x)=>a+Number(x.bakiye||0),0), cash=state.kasalar.reduce((a,x)=>a+Number(x.bakiye||0),0), receivable=state.cariler.reduce((a,x)=>a+Number(x.bakiye||0),0);return `<div class="cards"><div class="card"><small>Banka Net</small><strong>${money(bank)}</strong><span>${state.bankalar.length} hesap</span></div><div class="card"><small>Kasa Net</small><strong>${money(cash)}</strong><span>${state.kasalar.length} kasa</span></div><div class="card"><small>Cari Net</small><strong>${money(receivable)}</strong><span>${state.cariler.length} cari</span></div><div class="card"><small>Çek/Senet</small><strong>${money(state.cekler.filter(x=>x.durum==='PORTFOY').reduce((a,x)=>a+Number(x.tutar),0))}</strong><span>portföy</span></div><div class="card"><small>Fatura</small><strong>${state.faturalar.length}</strong><span>kayıt</span></div></div>`}
+async function pageDashboard(){const recent=await q('finans_islemleri','id,islem_turu,islem_tarihi,belge_no,aciklama,tutar,durum','created_at.desc');return shell('Merkezi Finans Motoru','Bütün bakiyeler merkezi finans hareketlerinden hesaplanır. Bağlı işlemler ana işlem üzerinden silinir.',cards()+`<div class="hero"><div><span class="eyebrow">TEK KAYNAK</span><h2>Her finans işlemi tek merkezden yönetilir.</h2><p>Transfer, tahsilat, fatura ve çek/senet işlemleri bağlı hareketlerini birlikte oluşturur.</p></div><div class="quick"><button data-action="new-cari">+ Cari</button><button data-action="new-bank">+ Banka</button><button data-action="new-cash">+ Kasa</button><button data-action="new-transfer">+ Transfer</button></div></div><div class="panel"><h3>Son işlemler</h3><table><thead><tr><th>Tarih</th><th>Tür</th><th>Açıklama</th><th>Tutar</th><th></th></tr></thead><tbody>${recent.slice(0,12).map(r=>`<tr><td>${r.islem_tarihi}</td><td><span class="tag">${esc(r.islem_turu)}</span></td><td>${esc(r.aciklama||r.belge_no||'-')}</td><td>${money(r.tutar)}</td><td><button class="danger small" data-delete="${r.id}">Sil</button></td></tr>`).join('')||'<tr><td colspan="5" class="empty">Henüz işlem yok.</td></tr>'}</tbody></table></div>`)}
+function accountForm(type){const isCari=type==='CARI', title=isCari?'Yeni Cari':type==='BANKA'?'Yeni Banka':'Yeni Kasa';return `<div class="form-grid"><label>Ad / Ünvan<input id="fName" required></label>${type==='BANKA'?'<label>Banka Adı<input id="fBank"></label><label>IBAN<input id="fIban"></label>':''}${isCari?'<label>Vergi No<input id="fTax"></label><label>Telefon<input id="fPhone"></label>':''}<label>Açılış Bakiyesi<input id="fOpening" type="number" step="0.01" value="0"></label><label>Açıklama<input id="fDesc"></label></div><button class="primary" data-save-account="${type}">${title} Kaydet</button>`}
+function accountTable(type,rows){return `<div class="panel"><table><thead><tr><th>${type==='CARI'?'Cari':type==='BANKA'?'Banka':'Kasa'}</th><th>Bakiye</th><th>Durum</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${esc(x.unvan||x.ad)}</b><small>${esc(x.banka_adi||x.iban||x.vergi_no||'')}</small></td><td class="amount">${money(x.bakiye)}</td><td><span class="tag ${Number(x.bakiye)>=0?'green':'red'}">${Number(x.bakiye)>=0?'POZİTİF':'NEGATİF'}</span></td><td><button class="secondary" data-account-move="${type}:${x.id}">Hareket</button></td></tr>`).join('')||'<tr><td colspan="4" class="empty">Kayıt yok.</td></tr>'}</tbody></table></div>`}
+async function pageAccounts(type){const rows=type==='CARI'?state.cariler:type==='BANKA'?state.bankalar:state.kasalar;const title=type==='CARI'?'Cari Hesaplar':type==='BANKA'?'Banka Hesapları':'Kasalar';return shell(title,'Bakiyeler kayıtlı hareketlerden hesaplanır.',`<div class="panel"><h3>${type==='CARI'?'Cari oluştur':'Hesap oluştur'}</h3>${accountForm(type)}</div>${accountTable(type,rows)}`)}
+function select(list, valField='id', labelField='ad', placeholder='Seçiniz'){return `<option value="">${placeholder}</option>`+list.map(x=>`<option value="${x[valField]}">${esc(x[labelField]||x.unvan)}</option>`).join('')}
+function transferForm(){return `<div class="form-grid"><label>Tutar<input id="trAmount" type="number" step="0.01" min="0.01"></label><label>Tarih<input id="trDate" type="date" value="${new Date().toISOString().slice(0,10)}"></label><label>Kaynak Türü<select id="trSourceType"><option>BANKA</option><option>KASA</option></select></label><label>Kaynak Hesap<select id="trSource"></select></label><label>Hedef Türü<select id="trTargetType"><option>KASA</option><option>BANKA</option></select></label><label>Hedef Hesap<select id="trTarget"></select></label><label class="wide">Açıklama<input id="trDesc"></label></div><button class="primary" data-save-transfer>Transfer Kaydet</button>`}
+function refreshTransferSelects(){const s=$('#trSource'),t=$('#trTarget');if(!s||!t)return;const fill=(el,type)=>el.innerHTML=select(type==='BANKA'?state.bankalar:state.kasalar,'id','ad');fill(s,$('#trSourceType').value);fill(t,$('#trTargetType').value)}
+function transferTable(){return `<div class="panel"><table><thead><tr><th>Tarih</th><th>Kaynak</th><th>Hedef</th><th>Tutar</th><th>İşlem</th></tr></thead><tbody>${state.transfers.map(x=>`<tr><td>${x.created_at?.slice(0,10)||'-'}</td><td>${x.kaynak_turu}</td><td>${x.hedef_turu}</td><td>${money(x.islem_id&&state._transferAmounts?.[x.islem_id])}</td><td><button class="danger small" data-delete="${x.islem_id}">Sil</button></td></tr>`).join('')||'<tr><td colspan="5" class="empty">Transfer yok.</td></tr>'}</tbody></table></div>`}
+async function pageTransfer(){const rows=await q('transferler','id,islem_id,kaynak_turu,kaynak_id,hedef_turu,hedef_id,created_at','created_at.desc');state.transfers=rows;const ids=rows.map(x=>x.islem_id);state._transferAmounts={};if(ids.length){const z=await db.from('finans_islemleri').select('id,tutar').in('id',ids);(z.data||[]).forEach(x=>state._transferAmounts[x.id]=x.tutar)}return shell('Para Transferleri','Kaynak hesaptan çıkış ve hedef hesaba giriş tek ana işleme bağlıdır.',`<div class="panel"><h3>Yeni Transfer</h3>${transferForm()}</div>${transferTable()}`)}
+async function pageTahsil(){return shell('Tahsilatlar','Cari bakiyesini azaltır, seçilen banka veya kasaya giriş oluşturur.',`<div class="panel"><div class="form-grid"><label>Cari<select id="colCari">${select(state.cariler,'id','unvan')}</select></label><label>Para Türü<select id="colType"><option>BANKA</option><option>KASA</option></select></label><label>Hesap<select id="colAccount"></select></label><label>Tutar<input id="colAmount" type="number" step="0.01"></label><label>Tarih<input id="colDate" type="date" value="${new Date().toISOString().slice(0,10)}"></label><label>Açıklama<input id="colDesc"></label></div><button class="primary" data-save-collection>Tahsilat Kaydet</button></div><div class="panel"><h3>Son Tahsilatlar</h3><table><thead><tr><th>Cari</th><th>Para</th><th>Tutar</th><th></th></tr></thead><tbody>${state.tahsilatlar.map(x=>`<tr><td>${x.cari_id}</td><td>${x.para_turu}</td><td>${money(state._collectionAmounts?.[x.islem_id])}</td><td><button class="danger small" data-delete="${x.islem_id}">Sil</button></td></tr>`).join('')||'<tr><td colspan="4" class="empty">Tahsilat yok.</td></tr>'}</tbody></table></div>`)}
+async function pageFatura(){return shell('Faturalar','Fatura ana işlemi cari hareketine tek kayıt olarak bağlanır.',`<div class="panel"><div class="form-grid"><label>Cari<select id="invCari">${select(state.cariler,'id','unvan')}</select></label><label>Tür<select id="invType"><option>SATIS</option><option>ALIS</option></select></label><label>Fatura No<input id="invNo"></label><label>Matrah<input id="invMatrah" type="number" step="0.01"></label><label>KDV<input id="invKdv" type="number" step="0.01"></label><label>Genel Toplam<input id="invTotal" type="number" step="0.01"></label><label>Tarih<input id="invDate" type="date" value="${new Date().toISOString().slice(0,10)}"></label><label>Açıklama<input id="invDesc"></label></div><button class="primary" data-save-invoice>Fatura Kaydet</button></div><div class="panel"><table><thead><tr><th>No</th><th>Tür</th><th>Tutar</th><th>Cari</th><th></th></tr></thead><tbody>${state.faturalar.map(x=>`<tr><td>${esc(x.fatura_no||'-')}</td><td>${x.fatura_turu}</td><td>${money(x.genel_toplam)}</td><td>${x.cari_id}</td><td><button class="danger small" data-delete="${x.islem_id}">Sil</button></td></tr>`).join('')||'<tr><td colspan="5" class="empty">Fatura yok.</td></tr>'}</tbody></table></div>`)}
+async function pageCek(){return shell('Çek / Senet','Portföy ve durum değişimleri ana işleme bağlıdır.',`<div class="panel"><div class="form-grid"><label>Cari<select id="chCari">${select(state.cariler,'id','unvan')}</select></label><label>Evrak Türü<select id="chType"><option>CEK</option><option>SENET</option></select></label><label>Yön<select id="chDir"><option>ALINAN</option><option>VERILEN</option></select></label><label>Evrak No<input id="chNo"></label><label>Vade<input id="chDue" type="date"></label><label>Tutar<input id="chAmount" type="number" step="0.01"></label></div><button class="primary" data-save-check>Çek / Senet Kaydet</button></div><div class="panel"><table><thead><tr><th>Evrak</th><th>Yön</th><th>Vade</th><th>Tutar</th><th>Durum</th><th></th></tr></thead><tbody>${state.cekler.map(x=>`<tr><td>${x.evrak_turu} ${esc(x.evrak_no||'-')}</td><td>${x.yon}</td><td>${x.vade_tarihi||'-'}</td><td>${money(x.tutar)}</td><td><span class="tag">${esc(x.durum)}</span></td><td>${x.durum==='PORTFOY'?`<button class="secondary" data-check-status="${x.id}">Bankaya Ver</button>`:''} <button class="danger small" data-delete="${x.islem_id}">Sil</button></td></tr>`).join('')||'<tr><td colspan="6" class="empty">Çek/senet yok.</td></tr>'}</tbody></table></div>`)}
+function route(){const p=state.page;$('#crumb').textContent=titles[p];$('#pageTitle').textContent=titles[p];document.querySelectorAll('#nav button[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===p));(async()=>{try{await loadAll();let html;if(p==='dashboard')html=await pageDashboard();else if(p==='cariler')html=await pageAccounts('CARI');else if(p==='bankalar')html=await pageAccounts('BANKA');else if(p==='kasalar')html=await pageAccounts('KASA');else if(p==='transferler')html=await pageTransfer();else if(p==='tahsilatlar')html=await pageTahsil();else if(p==='faturalar')html=await pageFatura();else html=await pageCek();content.innerHTML=html;bindDynamic();}catch(e){console.error(e);content.innerHTML=`<div class="panel errorbox"><b>Modül yüklenemedi</b><p>${esc(e.message)}</p></div>`}})()}
+function bindDynamic(){
+ if($('#trSourceType')){$('#trSourceType').onchange=refreshTransferSelects;$('#trTargetType').onchange=refreshTransferSelects;refreshTransferSelects()}
+ if($('#colType')){$('#colType').onchange=()=>{$('#colAccount').innerHTML=select($('#colType').value==='BANKA'?state.bankalar:state.kasalar,'id','ad')}}
+ if($('#colAccount')){$('#colAccount').innerHTML=select(state.bankalar,'id','ad')}
+ document.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>{const a=b.dataset.action;if(a==='new-cari')state.page='cariler';if(a==='new-bank')state.page='bankalar';if(a==='new-cash')state.page='kasalar';if(a==='new-transfer')state.page='transferler';route()});
+ document.querySelectorAll('[data-save-account]').forEach(b=>b.onclick=saveAccount);
+ const sb=$('[data-save-transfer]');if(sb)sb.onclick=saveTransfer;
+ const sc=$('[data-save-collection]');if(sc)sc.onclick=saveCollection;
+ const si=$('[data-save-invoice]');if(si)si.onclick=saveInvoice;
+ const sk=$('[data-save-check]');if(sk)sk.onclick=saveCheck;
+ document.querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>deleteTransaction(b.dataset.delete));
+ document.querySelectorAll('[data-check-status]').forEach(b=>b.onclick=()=>bankCheck(b.dataset.checkStatus));
+}
+async function saveAccount(e){const type=e.currentTarget.dataset.saveAccount,name=$('#fName').value.trim(),opening=Number($('#fOpening').value||0);if(!name)return toast('Ad/ünvan zorunlu.',false);try{let table=type==='CARI'?'cariler':type==='BANKA'?'bankalar':'kasalar';let payload=type==='CARI'?{unvan:name,vergi_no:$('#fTax').value,telefon:$('#fPhone').value}:type==='BANKA'?{ad:name,banka_adi:$('#fBank').value,iban:$('#fIban').value}:{ad:name};let x=await db.from(table).insert(payload).select('id').single();if(x.error)throw x.error;if(opening!==0)await rpc('create_simple_movement',{p_hesap_turu:type,p_hesap_id:x.data.id,p_yon:opening>0?1:-1,p_tutar:Math.abs(opening),p_aciklama:'Açılış bakiyesi'});toast('Kayıt oluşturuldu.');route()}catch(err){toast(err.message,false)}}
+async function saveTransfer(){try{await rpc('create_transfer',{p_tutar:Number($('#trAmount').value),p_kaynak_turu:$('#trSourceType').value,p_kaynak_id:$('#trSource').value,p_hedef_turu:$('#trTargetType').value,p_hedef_id:$('#trTarget').value,p_tarih:$('#trDate').value,p_aciklama:$('#trDesc').value||null});toast('Transfer kaydedildi.');route()}catch(e){toast(e.message,false)}}
+async function saveCollection(){try{const id=await rpc('create_tahsilat',{p_cari_id:$('#colCari').value,p_para_turu:$('#colType').value,p_para_id:$('#colAccount').value,p_tutar:Number($('#colAmount').value),p_tarih:$('#colDate').value,p_aciklama:$('#colDesc').value||null});toast('Tahsilat kaydedildi.');route()}catch(e){toast(e.message,false)}}
+async function saveInvoice(){try{await rpc('create_fatura',{p_cari_id:$('#invCari').value,p_fatura_turu:$('#invType').value,p_fatura_no:$('#invNo').value||null,p_matrah:Number($('#invMatrah').value||0),p_kdv:Number($('#invKdv').value||0),p_genel_toplam:Number($('#invTotal').value),p_tarih:$('#invDate').value,p_aciklama:$('#invDesc').value||null});toast('Fatura kaydedildi.');route()}catch(e){toast(e.message,false)}}
+async function saveCheck(){try{await rpc('create_cek_senet',{p_cari_id:$('#chCari').value,p_evrak_turu:$('#chType').value,p_yon:$('#chDir').value,p_evrak_no:$('#chNo').value||null,p_vade:$('#chDue').value||null,p_tutar:Number($('#chAmount').value),p_tarih:new Date().toISOString().slice(0,10)});toast('Çek/senet kaydedildi.');route()}catch(e){toast(e.message,false)}}
+async function bankCheck(id){try{await rpc('update_cek_senet_status',{p_cek_id:id,p_yeni_durum:'TAHSIL_EDILDI',p_para_turu:'BANKA',p_para_id:state.bankalar[0]?.id||null,p_tarih:new Date().toISOString().slice(0,10)});toast('Çek tahsil edildi.');route()}catch(e){toast(e.message,false)}}
+async function deleteTransaction(id){if(!confirm('Bu ana işlem ve bağlı tüm hareketleri silinecek. Emin misiniz?'))return;try{await rpc('delete_finans_islemi',{p_islem_id:id});toast('Ana işlem ve bağlı hareketler birlikte silindi.');route()}catch(e){toast(e.message,false)}}
+$('#nav').addEventListener('click',e=>{const b=e.target.closest('button[data-page]');if(!b)return;state.page=b.dataset.page;route()});
+(async()=>{if(await test()){await loadAll();route()}})();
 })();

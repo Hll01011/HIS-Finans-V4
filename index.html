@@ -1,24 +1,37 @@
 <!doctype html>
 <html lang="tr">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HİS Finans V4 — Bağlantı Testi</title>
-  <link rel="stylesheet" href="styles.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HİS Finans V4</title>
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <main class="card">
-    <div class="eyebrow">HİS Finans V4</div>
-    <h1>Temiz Kurulum</h1>
-    <p>Önce yalnızca Supabase bağlantısını doğruluyoruz. Bağlantı doğrulanmadan cari, banka, kasa veya diğer finans modülleri eklenmeyecek.</p>
-    <div id="status" class="status loading">BAĞLANTI TEST EDİLİYOR…</div>
-    <p id="detail">Supabase kimlik doğrulama servisine erişim kontrol ediliyor.</p>
-    <div class="meta"><span>Supabase: V4</span><span>Süre: <strong id="time">—</strong></span></div>
-    <button id="retry" type="button">Bağlantıyı Yeniden Test Et</button>
+<div id="app" class="app-shell">
+  <aside class="sidebar">
+    <div class="brand"><b>HİS FİNANS</b><span>Merkezi Finans Motoru V4</span></div>
+    <nav id="nav">
+      <button data-page="dashboard" class="active">▦ Genel Bakış</button>
+      <button data-page="cariler">♟ Cari Hesaplar</button>
+      <div class="nav-label">PARA YÖNETİMİ</div>
+      <button data-page="bankalar">▤ Bankalar</button>
+      <button data-page="kasalar">▣ Kasa</button>
+      <button data-page="transferler">⇄ Para Transferleri</button>
+      <button data-page="cekler">◇ Çek / Senet</button>
+      <div class="nav-label">TİCARİ</div>
+      <button data-page="faturalar">▧ Faturalar</button>
+      <button data-page="tahsilatlar">₺ Tahsilatlar</button>
+    </nav>
+    <div class="db-status"><i id="dbDot"></i><span id="dbText">Bağlanıyor…</span></div>
+  </aside>
+  <main class="main">
+    <header class="topbar"><div><small>HİS Finans / <span id="crumb">Genel Bakış</span></small><h1 id="pageTitle">Genel Bakış</h1></div><div id="live" class="pill">● KONTROL</div></header>
+    <section id="content" class="content"></section>
   </main>
-
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="config.js"></script>
-  <script src="app.js"></script>
+</div>
+<div id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
